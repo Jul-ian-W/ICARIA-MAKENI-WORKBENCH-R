@@ -1,0 +1,123 @@
+---
+title: "Record Change checker"
+author: "Julian Williams"
+date: '2023-06-09'
+output: html_document
+---
+
+#For hfs between 01 and 08 (inclusive), the new_record_id columns in the generated file should be formatted to 8 digits
+#Adjust the my_facilities variable specific to your facility
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+  #BEFORE THE CHANGE
+
+library(stringr)
+library(redcapAPI)
+
+
+source("../icaria_project_tokens.R")
+
+my.fields <- c("record_id",
+               "study_number"
+               )
+
+my.event <- c('epipenta1_v0_recru_arm_1')
+
+
+
+my_facilities <- list("HF16.04", "HF12.01", "HF06")
+
+long_record_length <- 4
+max_len_new_record <- 8
+pad <- "01"
+
+
+
+for (hf in names(kRedcapTokens)) {
+  if(hf %in% my_facilities){
+      print(paste("Extracting data from", hf))
+  
+      rcon <- redcapConnection(kRedcapAPIURL, kRedcapTokens[[hf]])
+      hf.data.before <- exportRecords(
+        rcon,
+        factors            = F,
+        labels             = F,
+        fields             = my.fields,
+        events             = my.event
+      )
+      
+      
+      hf.data.before$long_id <- str_pad(hf.data.before$record_id, width=long_record_length, side="left", pad="0")
+      if(nchar(hf) == 7){
+        hf.data.before$prefix <- paste(substr(hf,3,4), substr(hf,6,7), sep="")
+      }else if(nchar(hf) == 4){
+        hf.data.before$prefix <- paste(substr(hf,3,4), pad, sep="")
+      }
+      
+      hf.data.before$new_record_id <- paste(hf.data.before$prefix, hf.data.before$long_id, sep="")
+      hf.data.before$new_record_id <- paste(" ", hf.data.before$new_record_id, sep="")
+      hf.data.before <- hf.data.before[, c(my.fields, "new_record_id")]
+
+
+      write.csv(hf.data.before, paste(hf,"records.csv"), row.names = F)
+  } else{
+        print(paste("Facility", hf, "is not under consideration"))
+  }
+}
+
+
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+  #AFTER THE CHANGE
+
+
+my_facilities <- list("HF16.04", "HF12.01", "HF06")
+
+
+for (hf in names(kRedcapTokens)) {
+  if (!(hf %in% my_facilities)) {
+      print(paste("Facility", hf, "is not under consideration"))
+  }else if(hf %in% my_facilities){
+      print(paste("Extracting data from", hf))
+  
+      rcon <- redcapConnection(kRedcapAPIURL, kRedcapTokens[[hf]])
+      hf.data.after <- exportRecords(
+        rcon,
+        factors            = F,
+        labels             = F,
+        fields             = my.fields,
+        events             = my.event
+      )
+      
+      hf.data.after <- hf.data.after[, my.fields]
+      hf.data.after$pk <- paste(hf.data.after$record_id, hf.data.after$study_number, sep = "_") 
+      
+      old_records <- read.csv(paste(hf, "records.csv"))
+      old_records$new_record_id <- str_pad(old_records$new_record_id,
+                             width=max_len_new_record,
+                             side="left",
+                             pad="0"
+                             )
+      old_records$pk <- paste(old_records$new_record_id, old_records$study_number, sep = "_")
+      
+      #Look for error
+      filter <- !(old_records$pk %in% hf.data.after$pk)
+      to_check <- old_records[filter, c("study_number", "pk")]
+      if(nrow(to_check) == 0){
+        print(paste("All the records for ", hf, "were changed perfectly"))
+      }else{
+        print(paste("Please check", hf, "error file"))
+        write.csv(to_check, paste(hf, " error.csv"), row.names = F)
+      }
+  }
+}    
+    
+```
+
+ 
